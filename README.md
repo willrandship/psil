@@ -1,4 +1,4 @@
-#psil
+# psil
 ## Protected Stack Interpreter Language
 
 Psil is a pet project, aiming to repair everything wrong with lisp and FORTH
@@ -31,9 +31,9 @@ How psil differs from FORTH:
     but anything that has been predefined (including anything inside of any
     word) will represent local vs global context directly as pointers.
 
-##Basic syntax:
+## Basic syntax:
 
-###Words vs Numbers vs Specials
+### Words vs Numbers vs Specials
 
 A number is anything matching the interpreter's view of something "convertible to
 a single value". For example:
@@ -45,11 +45,11 @@ These values directly push the presented number to the stack.
 A word is anything that, when presented to the interpreter, returns a single
 value. This is almost always a pointer.
 
-####Specials
+#### Specials
 
 Special tokens have syntactical differences from others. Primarily,
 they do not require separators to function, so for example "asdf" is a
-valid string definition.
+valid string definition, and {word word word} is a valid code block.
 
 The following list is a set of special-purpose tokens that are not eligible for
 use in words.
@@ -63,14 +63,78 @@ use in words.
 , equivalent to whitespace in most scenarios
 \# starts a comment that ends at the next newline.
 
-{ starts defining a code block
+{ starts defining a code block 
+  The primary behavior here is as follows:
+  * The start of the code block on the stack is labeled.
+  * Push-like operations affect that stack instead of the main stack
+    * This includes words that would be executed.
+  * ( and ) push execution literals instead of actually executing.
+  * [ and ] force actual execution to occur like ( and ) do outside.
+    This allows compile-time programmatic definitions, like FORTH supports,
+    and is far more flexible than eg preprocessor directives in C.
+    It also allows the definition of static variables inside a word-local context.
+
 } finishes defining a code block, returning the invocation pointer.
+  Implementation-wise, the resulting substack is moved elsewhere
+  (code heap, alloc'ed space, *somewhere*)
   naming does not occur inside the code block.
 
+Curly braces can be nested, and are always evaluated at definition time.
+  
+[ and ] always run immediately, whereas ( and ) only run if they are
+interpreted outside of curly brace definitions.
 
 
 = this stores the second value in the stack to the address referenced by
   the top value in the stack. Since larger data types return pointers,
   this also allows strings, arrays, code, etc to use the same assignment.
   
-  123 a =
+  ( 123 a = )
+
+### Initialization
+
+Words must be 'defined' before use. This assigns them a single memory location, 
+whose address cannot be changed, and is implementation specific in size.
+It also allocates them to the
+
+In C terms, they are of type void * const.
+
+The words used to initalize new words are:
+
+"new_word_name" def
+
+In an ideal implementation, the words are defined in a pseudo-vector,
+sorted by their UTF-8 name. This makes for very fast word lookup.
+
+The dictionary stores the name and the address of the word's memory as
+two native values in size. (eg for x64, 16 bytes total)
+The first value is a pointer to the name's string, which is thrown on a
+heap. 
+The second value is a pointer to the allocated memory.
+
+These values are packed in sorted order in a size convenient for the system.
+(eg 256 values to a 4KB block on x64). The first 2 entry pairs in the packing
+are reserved for a direct-packed value indicating:
+* The first n bytes of the name of the last word in the block
+* The position of the last word in the block, as an offset
+* The location of the next block
+
+Words are inserted into their blocks, insertion sort style. Any leftovers
+pushed out of the block, instead of inserting into the next, create a new block
+with just them in it.
+
+Calling the word refers to the location, which might contain any of:
+* An integer, float, or other numerical type
+* An 8 character string
+* A pointer to an array of arbitrary type.
+* A pointer to some more complex structure.
+* A pointer to executable code.
+
+### Recursion
+
+A code block can recurse on itself by re-calling its own word. To do this,
+the code block should be stored into a word
+
+### Conditionals
+
+There are two styles of builtin conditional: 
