@@ -31,6 +31,24 @@ How psil differs from FORTH:
     but anything that has been predefined (including anything inside of any
     word) will represent local vs global context directly as pointers.
 
+Desirable: Word-level mailbox concurrency. Ideally, this would be accomplished
+by separate stacks for each invocation, with a given outer stack waiting on
+returns from inner stacks element-wise. In this fashion it is theoretically
+possible to have multiple words executing concurrently in a green-thread style,
+with a FIFO queue of launched tasks that cycle through when their dependencies
+arrive.
+
+## Conceptual overview of the backend
+
+Psil operates using two separate stacks.
+
+Call stack - Used for returning from word calls, implementing tracebacks, etc.
+			 Also contains bottom-of-local stack offsets.
+Work stack - Holds the global working data, and performs overrun checks against the call stack.
+			 during function calls. This is the stack you directly interact
+			 with the most.
+
+
 ## Basic syntax:
 
 ### Words vs Numbers vs Specials
@@ -85,11 +103,11 @@ Curly braces can be nested, and are always evaluated at definition time.
 interpreted outside of curly brace definitions.
 
 
-= this stores the second value in the stack to the address referenced by
-  the top value in the stack. Since larger data types return pointers,
+= this stores the top value in the stack to the address referenced by
+  the next-down value in the stack. Since larger data types return pointers,
   this also allows strings, arrays, code, etc to use the same assignment.
   
-  ( 123 a = )
+  ( a 123 = )
 
 ### Initialization
 
@@ -102,6 +120,12 @@ In C terms, they are of type void * const.
 The words used to initalize new words are:
 
 "new_word_name" def
+
+The result of this is the same as if the new word had just been used:
+the new pointer is at the top of the stack. This means creating and storing
+a value into a word looks like:
+
+("word" def 123 =)
 
 In an ideal implementation, the words are defined in a pseudo-vector,
 sorted by their UTF-8 name. This makes for very fast word lookup.
@@ -133,8 +157,48 @@ Calling the word refers to the location, which might contain any of:
 ### Recursion
 
 A code block can recurse on itself by re-calling its own word. To do this,
-the code block should be stored into a word
+the code block should be stored into a word that has already been defined
+
+For example, this is an infinite recursion loop.
+( "recursing" def { (recursing) } = )
+
+This works because the word is a pointer to the code block, and the pointer
+is allocated before the code block is compiled, so the address that is placed is correct.
+
+This would not work if you wanted to do immediate [] recursion, since the
+pointer does not yet point to the code block that is compiling.
+
+### Lambdas/Anonymous functions
+
+Code blocks need not be named to be executed. Consider the following statement:
+
+( args { lambda-expression } )
+
+So long as recursion is not required, this works just fine.
 
 ### Conditionals
 
 There are two styles of builtin conditional: 
+
+Ternary operators
+If/then on code blocks
+
+In C, a ternary operator checks an input and returns either of 2 following values as true or false.
+
+In psil, ...(iftrue iffalse condition ?) does something very similar.'
+If the condition is true, the stack is left with only ...iftrue
+If not, the stack is left with only ...iffalse
+
+If this is for flow control, iffalse and iftrue can each be their own code blocks, like so:
+
+( pre-args {code that runs if true (then-like)} {code that runs if false (else-like)} condition ? )
+
+This executes the true/false block conditionally (but never both) with the
+same provided leading arguments, while preserving stack protection.
+
+### Printing
+
+
+### Example - Fibbonaci Sequence
+
+("fib" def { (. .. +) } =) (1 1 fib)
